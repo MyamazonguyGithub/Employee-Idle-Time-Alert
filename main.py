@@ -1,4 +1,5 @@
 import os
+import json
 import calendar
 import requests
 from datetime import datetime, timedelta, date
@@ -233,6 +234,18 @@ def search_worker_stats(td_user_id, today, start_date):
             'total_hours_worked_str': "-"
         }
 
+def openJsonFile(file_path):
+    try:
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+        return data
+    except FileNotFoundError:
+        logging.error(f"File not found: {file_path}")
+        return {}
+    except json.JSONDecodeError:
+        logging.error(f"Error decoding JSON from file: {file_path}")
+        return {}
+
 def main(dev_mode=False):
     print(" --------------- Starting execution")
     if dev_mode: 
@@ -274,6 +287,9 @@ def main(dev_mode=False):
             name = worker['fields'].get('Worker')
             email = worker['fields'].get('Work Email Address')[0]
             slack_id = worker['fields'].get('Slack Member ID')
+            
+            position = worker['fields'].get('Current Position Title')
+            position_title = position[0] if position else None
 
             director_list = worker['fields'].get("Director Name") or [] 
             director = director_list[0] if director_list else None
@@ -290,6 +306,7 @@ def main(dev_mode=False):
                 'slack_id': slack_id,
                 'name': name,
                 'email': email,
+                'position_title': position_title,
                 'manager': manager,
                 'director': director,
                 'manager_slack_id': manager_slack_id,
@@ -320,13 +337,17 @@ def main(dev_mode=False):
 
         if today.weekday() == 0: # Monday - Check if today is payday
             managers = list({d['manager'] for d in data})
+            idle_time_map = openJsonFile("idle-time-per-role.json")
             for mgr in managers:
-                filtered_data = [d for d in data if d['manager']==mgr and d['idle_float'] >15.0]
+                filtered_data = []
+                for d in data:
+                    if d['manager']==mgr:
+                        if d['idle_float'] > idle_time_map.get(d['position_title'], 15):
+                            filtered_data.append(d)
                 if filtered_data:
                     sendSlackAlert(filtered_data)
         if today.weekday() == 6: # Sunday *2. Google Sheet Auto-Population (Weekly)* every week
             pass
-
     except Exception as e:
         logging.error(f"An error occurred: {e}")
 
